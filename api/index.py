@@ -1,83 +1,96 @@
-import torch
-import torch.nn as nn
-import numpy as np
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 import base64
 import io
-from PIL import Image,ImageChops
+import numpy as np
+import torch
+from flask import Flask, request, jsonify
+from PIL import Image, ImageChops, ImageOps
+from torch import nn
 
-# --------------- 模型定义（需与训练代码一致）---------------
-class ImprovedMNISTModel(nn.Module):
+app = Flask(__name__)
+
+# 定义与训练一致的模型结构
+class MNISTModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
+        self.flatten = nn.Flatten()
+        self.linear_relu_stack = nn.Sequential(
+            nn.Linear(28*28, 512),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
+            nn.Linear(512, 512),
             nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.25),
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.25),
-        )
-        self.classifier = nn.Sequential(
-            nn.Linear(128 * 7 * 7, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(512, 10)
-        )
-
+            nn.Linear(512, 10))
+    
     def forward(self, x):
-        x = self.features(x)
-        x = x.view(x.size(0), -1)
-        x = self.classifier(x)
-        return x
+        x = self.flatten(x)
+        logits = self.linear_relu_stack(x)
+        return logits
 
-# --------------- Flask 初始化 ---------------
-app = Flask(__name__)
-cors = CORS(app)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# 模型加载（带缓存）
+@torch.no_grad()
+def load_model():
+    model = MNISTModel()
+    model.load_state_dict(torch.load("model.pth", map_location="cpu"))
+    model.eval()
+    return model
 
-model = ImprovedMNISTModel().to(device)
-model.load_state_dict(torch.load("best_model.pth", map_location=device))
-model.eval()
-# --------------- API 路由 ---------------
+model = load_model()
+
 @app.route("/api/predict", methods=["POST","OPTIONS"])
 def predict():
     if request.method == 'OPTIONS':
         return '', 204
-    # 解析 Base64 图像
-    data = request.json
-    image_base64 = data["image"].split(",")[1]
     try:
-        # 预处理
-        image_bytes = base64.b64decode(image_base64)
-        image = Image.open(io.BytesIO(image_bytes))
-        image = image.resize((28, 28),Image.LANCZOS)  # 缩放至 28x28
-        background = Image.new("RGB", image.size, (255, 255, 255))
-        background.paste(image, mask=image.split()[3])  #Alpha
-        # 再转灰度
-        image =background.convert("L")
-        image =ImageChops.invert(image)
-        pixels = np.array(image, dtype=np.float32) / 255.0
-        pixels = (pixels - 0.1307) / 0.3081  # 使用 MNIST 的均值和标准差
-        # 转换为 PyTorch 张量并推理
-        input_tensor = torch.tensor(pixels, device=device).unsqueeze(0).unsqueeze(0)  # 格式 [1,1,28,28]
-        with torch.no_grad():
-            output = model(input_tensor)
-            prediction = int(torch.argmax(output))
+        # 解析请求
+        data = request.get_json()
+        if not data or "image" not in data:
+            return jsonify({"error": "Missing image data"}), 400
         
-        return jsonify({"prediction": prediction,"potencial":output.tolist()})
+        # Base64解码
+        header, image_base64 = data["image"].split(",", 1)
+        image_bytes = base64.b64decode(image_base64)
+        
+        # 图像处理
+        try:
+            image = Image.open(io.BytesIO(image_bytes))
+            
+            # 处理透明通道
+            if image.mode == "RGBA":
+                bg = Image.new("RGB", image.size, (255, 255, 255))
+                bg.paste(image, mask=image.split()[3])
+                image = bg
+                
+            # 标准化处理
+            image = image.convert("L")                      # 转灰度
+            image = ImageOps.fit(image, (28, 28))          # 保持比例缩放
+            image = ImageChops.invert(image)               # 颜色反转
+            
+            # 转换为张量
+            pixels = np.array(image, dtype=np.float32) / 255.0
+            tensor = torch.tensor(pixels).unsqueeze(0).unsqueeze(0)  # [1,1,28,28]
+            tensor = (tensor - 0.1307) / 0.3081             # 与训练相同的归一化
+        except Exception as e:
+            return jsonify({"error": f"Image processing error: {str(e)}"}), 400
+        
+        # 模型预测
+        with torch.no_grad():
+            outputs = model(tensor)
+            probs = torch.nn.functional.softmax(outputs, dim=1)[0]
+        
+        predicted = int(torch.argmax(probs))
+        confidence = float(probs[predicted])
+        
+        return jsonify({
+            "prediction": predicted,
+            "confidence": round(confidence, 4)
+        })
     
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Vercel适配
 if __name__ == "__main__":
-    app.run(debug=False)
+    app.run(host="0.0.0.0", port=5000)
+else:
+    from serverless_wsgi import handle_request
+    def lambda_handler(event, context):
+        return handle_request(app, event, context)
