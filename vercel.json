@@ -1,14 +1,23 @@
 {
   "builds": [
     {
+<<<<<<< HEAD
       "src": "api/index.py",
+=======
+      "src": "app.py",
+>>>>>>> 20c21d7 (none)
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
+<<<<<<< HEAD
       "src": "/api/(.*)",
       "dest": "/api/index.py"
+=======
+      "src": "/(.*)",
+      "dest": "app.py"
+>>>>>>> 20c21d7 (none)
     }
   ],
   "headers": [
@@ -21,7 +30,11 @@
         },
         {
           "key": "Access-Control-Allow-Methods",
+<<<<<<< HEAD
           "value": "POST"
+=======
+          "value": "POST,OPTIONS"
+>>>>>>> 20c21d7 (none)
         },
         {
           "key": "Access-Control-Allow-Headers",
