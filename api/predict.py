@@ -14,8 +14,10 @@ def softmax(x):
     exp_x = np.exp(x - np.max(x))
     return exp_x / exp_x.sum()
 
-@predict_route.route('/predict', methods=['POST'])
+@predict_route.route('/predict', methods=['POST','OPTIONS'])
 def predict():
+    if request.method == 'OPTIONS':
+        return jsonify({'message': 'CORS preflight response'}), 200
     try:
         data = request.json
         # 图像预处理
