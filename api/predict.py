@@ -117,20 +117,27 @@ class Seats:
         self.seats[0][1]=now_available_people_in_first_column[1]
         self.seats[0][2]=now_available_people_in_first_column[2]
         self.seats[0][3]=Pair('x')
-        self.seats[0][4]=now_available_people_in_first_column[3]
+        if len(now_available_people_in_first_column) == 4:
+            self.seats[0][4]=now_available_people_in_first_column[3]
+        else:
+            self.seats[0][4]=Pair('x')
         self.seats[0][5]=Pair('x')
         #特判：鲁唐杨真必须坐在当前列的第一排，因为他坐在后面看不清楚
         column_of_lutang:int = 0
+        row_of_lutang:int = 0
         for column in range(len(self.seats)):
             for row in range(len(self.seats[column])):
                 if self.seats[column][row].first == '鲁唐扬真':
                     column_of_lutang = column
+                    row_of_lutang = row
                     break
         if column_of_lutang != 0:#这里处理他不在第一列的情况
+            self.seats[column_of_lutang].remove(self.seats[column_of_lutang][row_of_lutang])
             last_row_of_lutang = self.seats[column_of_lutang][-1]
             for i in range(len(self.seats[column_of_lutang])-1,0,-1):
                 self.seats[column_of_lutang][i] = self.seats[column_of_lutang][i-1]
             self.seats[column_of_lutang][0] = last_row_of_lutang
+            self.seats[column_of_lutang].insert(0, Pair('鲁唐扬真'))
 
     def __str__(self):
         #打印座位表
@@ -155,6 +162,13 @@ def get_seats():
     if request.method == 'OPTIONS':
         return jsonify({'code':200})
     time:int = request.json['time']
+    print('time:',time)
     seats = Seats()
+    #debug
+    # seats.seats=[[Pair('a1'),Pair('a2'),Pair('a3'),Pair('x'),Pair('a4'),Pair('x')],
+    #              [Pair('b1'),Pair('b2'),Pair('b3'),Pair('b4'),Pair('b5'),Pair('x')],
+    #              [Pair('c1'),Pair('c2'),Pair('c3'),Pair('c4'),Pair('c5'),Pair('c6')],
+    #              [Pair('d1'),Pair('d2'),Pair('d3'),Pair('d4'),Pair('d5'),Pair('d6')],
+    #              [Pair('鲁唐扬真'),Pair('e2'),Pair('e3'),Pair('e4'),Pair('e5'),Pair('e6')]]
     seats.trans(time)
     return jsonify(seats.to_json())
